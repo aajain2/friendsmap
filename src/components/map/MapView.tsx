@@ -9,6 +9,13 @@ import type { UserEntry, TimePeriod } from '@/types';
 import TimePeriodToggle from './TimePeriodToggle';
 import PeoplePanel from './PeoplePanel';
 
+const PERIODS: TimePeriod[] = ['summer', 'year1', 'year2'];
+const PERIOD_LABELS: Record<TimePeriod, string> = {
+  summer: 'Summer 2026',
+  year1: '2026-2027',
+  year2: '2027-2028',
+};
+
 function getLocationForPeriod(user: UserEntry, period: TimePeriod) {
   switch (period) {
     case 'summer':
@@ -20,17 +27,31 @@ function getLocationForPeriod(user: UserEntry, period: TimePeriod) {
   }
 }
 
-// Small jitter to separate co-located users
 function jitter(base: number, index: number): number {
   const seed = Math.sin(index * 12.9898) * 43758.5453;
-  return base + (seed - Math.floor(seed) - 0.5) * 0.03;
+  return base + (seed - Math.floor(seed) - 0.5) * 0.04;
 }
 
-function buildGeoJSON(users: UserEntry[], period: TimePeriod): GeoJSON.FeatureCollection {
+function generateInitialImage(color: string, initial: string, size: number = 80): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    <circle cx="${size/2}" cy="${size/2}" r="${size/2 - 2}" fill="${color}"/>
+    <circle cx="${size/2 - 6}" cy="${size/2 - 6}" r="${size * 0.18}" fill="white" opacity="0.12"/>
+    <text x="${size/2}" y="${size/2 + 1}" text-anchor="middle" dominant-baseline="central"
+      font-family="Helvetica Neue, Arial, sans-serif" font-weight="600" font-size="${size * 0.38}"
+      fill="white" letter-spacing="-0.5">${initial}</text>
+  </svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function buildGeoJSON(users: UserEntry[], period: TimePeriod, selectedIds: Set<string>): GeoJSON.FeatureCollection {
+  // If some people are selected, only show those; if none selected, show all
+  const filtered = selectedIds.size > 0 ? users.filter((u) => selectedIds.has(u.id!)) : users;
   return {
     type: 'FeatureCollection',
-    features: users.map((user, i) => {
+    features: filtered.map((user, i) => {
       const loc = getLocationForPeriod(user, period);
+      const initial = user.name.charAt(0).toUpperCase();
+      const iconId = `initial-${initial}-${user.node_color.replace('#', '')}`;
       return {
         type: 'Feature',
         geometry: {
@@ -43,10 +64,52 @@ function buildGeoJSON(users: UserEntry[], period: TimePeriod): GeoJSON.FeatureCo
           city: loc.city,
           activity: loc.activity || '',
           color: user.node_color,
+          icon: iconId,
         },
       };
     }),
   };
+}
+
+// Smoothly interpolate between two GeoJSON feature collections over time
+function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
+
+function interpolateGeoJSON(
+  from: GeoJSON.FeatureCollection,
+  to: GeoJSON.FeatureCollection,
+  t: number,
+): GeoJSON.FeatureCollection {
+  // Match features by id
+  const toMap = new Map<string, GeoJSON.Feature>();
+  to.features.forEach((f) => toMap.set(f.properties?.id, f));
+  const fromMap = new Map<string, GeoJSON.Feature>();
+  from.features.forEach((f) => fromMap.set(f.properties?.id, f));
+
+  // All unique ids
+  const allIds = new Set([...fromMap.keys(), ...toMap.keys()]);
+  const features: GeoJSON.Feature[] = [];
+
+  allIds.forEach((id) => {
+    const fFrom = fromMap.get(id);
+    const fTo = toMap.get(id);
+    if (fFrom && fTo) {
+      const coordsFrom = (fFrom.geometry as GeoJSON.Point).coordinates;
+      const coordsTo = (fTo.geometry as GeoJSON.Point).coordinates;
+      features.push({
+        ...fTo,
+        geometry: {
+          type: 'Point',
+          coordinates: [lerp(coordsFrom[0], coordsTo[0], t), lerp(coordsFrom[1], coordsTo[1], t)],
+        },
+      });
+    } else if (fTo) {
+      features.push(fTo);
+    } else if (fFrom) {
+      features.push(fFrom);
+    }
+  });
+
+  return { type: 'FeatureCollection', features };
 }
 
 export default function MapView() {
@@ -57,8 +120,12 @@ export default function MapView() {
   const [users, setUsers] = useState<UserEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [selectedPeople, setSelectedPeople] = useState<Set<string>>(new Set());
+  const playingRef = useRef(false);
+  const loadedImagesRef = useRef<Set<string>>(new Set());
+  const animFrameRef = useRef<number>(0);
 
-  // Fetch users once
   useEffect(() => {
     fetchAllUsers()
       .then(setUsers)
@@ -66,114 +133,115 @@ export default function MapView() {
       .finally(() => setLoading(false));
   }, []);
 
+  const registerImages = useCallback((map: maplibregl.Map, userList: UserEntry[]) => {
+    userList.forEach((user) => {
+      const initial = user.name.charAt(0).toUpperCase();
+      const iconId = `initial-${initial}-${user.node_color.replace('#', '')}`;
+      if (loadedImagesRef.current.has(iconId)) return;
+      const img = new Image(80, 80);
+      img.onload = () => {
+        if (!map.hasImage(iconId)) map.addImage(iconId, img, { sdf: false });
+        loadedImagesRef.current.add(iconId);
+      };
+      img.src = generateInitialImage(user.node_color, initial, 80);
+    });
+  }, []);
+
   // Initialize map
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return;
 
-    const style = createMapStyle();
-
     const map = new maplibregl.Map({
       container: mapContainer.current,
-      style,
+      style: createMapStyle(),
       center: [-40, 30],
       zoom: 1.8,
       minZoom: 1,
       maxZoom: 16,
-      attributionControl: false,
+    });
+
+    // Also set sky at runtime to ensure atmosphere is off
+    map.on('style.load', () => {
+      try {
+        map.setSky({
+          'sky-color': '#f0e8de',
+          'sky-horizon-blend': 0,
+          'horizon-color': '#f0e8de',
+          'horizon-fog-blend': 0,
+          'fog-color': '#f0e8de',
+          'fog-ground-blend': 0,
+          'atmosphere-blend': 0,
+        });
+      } catch {
+        // ignore if not supported
+      }
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
 
     map.on('load', () => {
-      // Add people data source
       map.addSource('people', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
 
-      // Glow layer (larger, blurred) — hand-drawn ink bleed effect
+      // Outer glow — shrinks as you zoom in
+      map.addLayer({
+        id: 'people-glow-outer',
+        type: 'circle',
+        source: 'people',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 28, 4, 22, 8, 14, 12, 8, 16, 5],
+          'circle-color': ['get', 'color'],
+          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 1, 0.08, 8, 0.05, 14, 0.03],
+          'circle-blur': 1,
+        },
+      });
+
+      // Inner glow — shrinks as you zoom in
       map.addLayer({
         id: 'people-glow',
         type: 'circle',
         source: 'people',
         paint: {
-          'circle-radius': [
-            'interpolate', ['linear'], ['zoom'],
-            1, 10,
-            4, 14,
-            8, 20,
-            12, 28,
-          ],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 18, 4, 14, 8, 10, 12, 6, 16, 4],
           'circle-color': ['get', 'color'],
-          'circle-opacity': 0.2,
-          'circle-blur': 1,
+          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 1, 0.14, 8, 0.08, 14, 0.04],
+          'circle-blur': 0.5,
         },
       });
 
-      // Main node layer — hand-drawn dot feel
+      // Icon layer — shrinks as you zoom in
       map.addLayer({
-        id: 'people-nodes',
-        type: 'circle',
+        id: 'people-icons',
+        type: 'symbol',
         source: 'people',
-        paint: {
-          'circle-radius': [
-            'interpolate', ['linear'], ['zoom'],
-            1, 4,
-            4, 6,
-            8, 9,
-            12, 13,
-          ],
-          'circle-color': ['get', 'color'],
-          'circle-opacity': 0.9,
-          'circle-stroke-width': [
-            'interpolate', ['linear'], ['zoom'],
-            1, 1,
-            8, 2,
-          ],
-          'circle-stroke-color': '#f5f0eb',
+        layout: {
+          'icon-image': ['get', 'icon'],
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 1, 0.5, 4, 0.42, 8, 0.32, 12, 0.22, 16, 0.15],
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
         },
       });
 
-      // Inner dot (gives a hand-drawn target/pin feel)
-      map.addLayer({
-        id: 'people-inner',
-        type: 'circle',
-        source: 'people',
-        paint: {
-          'circle-radius': [
-            'interpolate', ['linear'], ['zoom'],
-            1, 1.5,
-            4, 2,
-            8, 3,
-            12, 4,
-          ],
-          'circle-color': '#f5f0eb',
-          'circle-opacity': 0.8,
-        },
-      });
-
-      // Name labels (visible at higher zoom)
+      // Name labels
       map.addLayer({
         id: 'people-labels',
         type: 'symbol',
         source: 'people',
-        minzoom: 4,
+        minzoom: 3,
         layout: {
           'text-field': ['get', 'name'],
-          'text-font': ['Open Sans Semibold'],
-          'text-size': [
-            'interpolate', ['linear'], ['zoom'],
-            4, 10,
-            8, 12,
-          ],
-          'text-offset': [0, -1.6],
-          'text-anchor': 'bottom',
+          'text-font': ['Noto Sans Bold'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 3, 10, 6, 12, 10, 14],
+          'text-offset': [0, 2.4],
+          'text-anchor': 'top',
           'text-allow-overlap': false,
           'text-padding': 8,
         },
         paint: {
           'text-color': '#2B2B23',
-          'text-halo-color': 'rgba(245, 240, 235, 0.95)',
+          'text-halo-color': 'rgba(240, 232, 222, 0.95)',
           'text-halo-width': 2,
         },
       });
@@ -181,65 +249,48 @@ export default function MapView() {
       mapRef.current = map;
     });
 
-    // Hover interactions
+    // Hover/click
     const tooltip = tooltipRef.current;
-
-    map.on('mouseenter', 'people-nodes', () => {
-      map.getCanvas().style.cursor = 'pointer';
+    ['people-icons', 'people-glow'].forEach((layer) => {
+      map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', layer, () => {
+        map.getCanvas().style.cursor = '';
+        if (tooltip) tooltip.style.display = 'none';
+      });
+      map.on('mousemove', layer, (e) => {
+        if (!tooltip || !e.features?.length) return;
+        const p = e.features[0].properties!;
+        tooltip.innerHTML = `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+            <div style="width:10px;height:10px;border-radius:50%;background:${p.color};box-shadow:0 0 6px ${p.color}40;"></div>
+            <span style="font-family:'Instrument Serif',Georgia,serif;font-size:16px;">${p.name}</span>
+          </div>
+          <div style="font-size:12px;color:rgba(43,43,35,0.55);padding-left:18px;">
+            ${p.city}${p.activity ? ` · ${p.activity}` : ''}
+          </div>`;
+        tooltip.style.display = 'block';
+        tooltip.style.left = `${e.point.x + 14}px`;
+        tooltip.style.top = `${e.point.y - 14}px`;
+      });
     });
 
-    map.on('mouseleave', 'people-nodes', () => {
-      map.getCanvas().style.cursor = '';
-      if (tooltip) tooltip.style.display = 'none';
-    });
-
-    map.on('mousemove', 'people-nodes', (e) => {
-      if (!tooltip || !e.features || e.features.length === 0) return;
-      const props = e.features[0].properties;
-      if (!props) return;
-
-      const name = props.name;
-      const city = props.city;
-      const activity = props.activity;
-      const color = props.color;
-
-      tooltip.innerHTML = `
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-          <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></div>
-          <span style="font-family:'Instrument Serif',Georgia,serif;font-size:15px;font-weight:400;">${name}</span>
-        </div>
-        <div style="font-size:12px;color:rgba(43,43,35,0.6);padding-left:16px;">
-          ${city}${activity ? ` · ${activity}` : ''}
-        </div>
-      `;
-
-      tooltip.style.display = 'block';
-      tooltip.style.left = `${e.point.x + 12}px`;
-      tooltip.style.top = `${e.point.y - 12}px`;
-    });
-
-    // Click on node to fly to it
-    map.on('click', 'people-nodes', (e) => {
-      if (!e.features || e.features.length === 0) return;
+    map.on('click', 'people-icons', (e) => {
+      if (!e.features?.length) return;
       const coords = (e.features[0].geometry as GeoJSON.Point).coordinates;
       map.flyTo({ center: [coords[0], coords[1]], zoom: Math.max(map.getZoom(), 6), duration: 1200 });
     });
 
-    return () => {
-      map.remove();
-      mapRef.current = null;
-    };
+    return () => { map.remove(); mapRef.current = null; };
   }, []);
 
-  // Update data when period or users change
+  // Update data when period, users, or selection changes
   const updateData = useCallback(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
+    registerImages(map, users);
     const source = map.getSource('people') as maplibregl.GeoJSONSource | undefined;
-    if (source) {
-      source.setData(buildGeoJSON(users, period));
-    }
-  }, [users, period]);
+    if (source) source.setData(buildGeoJSON(users, period, selectedPeople));
+  }, [users, period, selectedPeople, registerImages]);
 
   useEffect(() => {
     updateData();
@@ -250,38 +301,127 @@ export default function MapView() {
     }
   }, [updateData]);
 
+  // Smooth animated transition between periods
+  const animateTransition = useCallback((fromPeriod: TimePeriod, toPeriod: TimePeriod, onComplete: () => void) => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) { onComplete(); return; }
+
+    const source = map.getSource('people') as maplibregl.GeoJSONSource | undefined;
+    if (!source) { onComplete(); return; }
+
+    const fromGeo = buildGeoJSON(users, fromPeriod, selectedPeople);
+    const toGeo = buildGeoJSON(users, toPeriod, selectedPeople);
+    const duration = 1800; // ms
+    const start = performance.now();
+
+    function step(now: number) {
+      const elapsed = now - start;
+      const t = Math.min(elapsed / duration, 1);
+      // Ease in-out cubic
+      const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+      source!.setData(interpolateGeoJSON(fromGeo, toGeo, eased));
+
+      if (t < 1) {
+        animFrameRef.current = requestAnimationFrame(step);
+      } else {
+        onComplete();
+      }
+    }
+
+    animFrameRef.current = requestAnimationFrame(step);
+  }, [users, selectedPeople]);
+
+  // Play animation
+  const playAnimation = useCallback(async () => {
+    if (playingRef.current || users.length === 0) return;
+    playingRef.current = true;
+    setIsPlaying(true);
+    const map = mapRef.current;
+    if (!map) { playingRef.current = false; setIsPlaying(false); return; }
+
+    const visibleUsers = selectedPeople.size > 0
+      ? users.filter((u) => selectedPeople.has(u.id!))
+      : users;
+
+    // Compute overall center
+    const allCoords: [number, number][] = [];
+    visibleUsers.forEach((u) => {
+      PERIODS.forEach((p) => {
+        const loc = getLocationForPeriod(u, p);
+        allCoords.push([loc.lng, loc.lat]);
+      });
+    });
+    const avgLng = allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length;
+    const avgLat = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length;
+
+    // Start zoomed out
+    map.flyTo({ center: [avgLng, avgLat], zoom: 2, duration: 1500, essential: true });
+    await sleep(1800);
+
+    for (let i = 0; i < PERIODS.length; i++) {
+      if (!playingRef.current) break;
+      const prevPeriod = i === 0 ? PERIODS[0] : PERIODS[i - 1];
+      const nextPeriod = PERIODS[i];
+
+      // Animate dots sliding to new positions
+      await new Promise<void>((resolve) => {
+        animateTransition(prevPeriod, nextPeriod, resolve);
+      });
+      setPeriod(nextPeriod);
+
+      // Fly to this period's center
+      const periodCoords = visibleUsers.map((u) => getLocationForPeriod(u, nextPeriod));
+      const pLng = periodCoords.reduce((s, c) => s + c.lng, 0) / periodCoords.length;
+      const pLat = periodCoords.reduce((s, c) => s + c.lat, 0) / periodCoords.length;
+
+      map.flyTo({ center: [pLng, pLat], zoom: 3.5, duration: 2000, essential: true });
+      await sleep(3000);
+    }
+
+    // Zoom back out
+    if (playingRef.current) {
+      map.flyTo({ center: [avgLng, avgLat], zoom: 1.8, duration: 1500, essential: true });
+    }
+
+    playingRef.current = false;
+    setIsPlaying(false);
+  }, [users, selectedPeople, animateTransition]);
+
+  const stopAnimation = useCallback(() => {
+    playingRef.current = false;
+    setIsPlaying(false);
+    cancelAnimationFrame(animFrameRef.current);
+  }, []);
+
   const handleUserUpdated = useCallback((updated: UserEntry) => {
     setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
   }, []);
 
   const handleFlyTo = useCallback((lng: number, lat: number) => {
-    const map = mapRef.current;
-    if (map) {
-      map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 6), duration: 1200 });
-    }
+    mapRef.current?.flyTo({ center: [lng, lat], zoom: Math.max(mapRef.current.getZoom(), 6), duration: 1200 });
+  }, []);
+
+  // Toggle selection of a person
+  const togglePersonSelection = useCallback((userId: string) => {
+    setSelectedPeople((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedPeople(new Set());
   }, []);
 
   return (
-    <div className="relative w-full h-screen overflow-hidden">
-      {/* Map */}
+    <div className="relative w-full h-screen overflow-hidden bg-[#f0e8de]">
       <div ref={mapContainer} className="map-vintage w-full h-full" />
 
-      {/* Paper texture overlay */}
-      <div
-        className="absolute inset-0 pointer-events-none z-10"
-        style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E")`,
-        }}
-      />
-
-      {/* Sketch grain overlay — adds hand-drawn texture feel */}
-      <div
-        className="absolute inset-0 pointer-events-none z-10 mix-blend-multiply"
-        style={{
-          opacity: 0.02,
-          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='turbulence' baseFrequency='0.5' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23g)'/%3E%3C/svg%3E")`,
-        }}
-      />
+      {/* Paper grain */}
+      <div className="absolute inset-0 pointer-events-none z-10 paper-grain" />
 
       {/* People panel */}
       <PeoplePanel
@@ -291,12 +431,15 @@ export default function MapView() {
         onToggleCollapse={() => setPanelCollapsed((c) => !c)}
         onUserUpdated={handleUserUpdated}
         onFlyTo={handleFlyTo}
+        selectedPeople={selectedPeople}
+        onToggleSelect={togglePersonSelection}
+        onClearSelection={clearSelection}
       />
 
-      {/* Header bar */}
+      {/* Header */}
       <div
         className="absolute top-0 z-20 flex items-center justify-between px-6 py-4 transition-all duration-300"
-        style={{ left: panelCollapsed ? 0 : 320, right: 0 }}
+        style={{ left: panelCollapsed ? 60 : 320, right: 0 }}
       >
         <h1
           className="text-xl tracking-tight"
@@ -304,25 +447,66 @@ export default function MapView() {
         >
           Friends Map
         </h1>
-        <TimePeriodToggle active={period} onChange={setPeriod} />
+
+        <div className="flex items-center gap-2">
+          <TimePeriodToggle active={period} onChange={setPeriod} />
+          <button
+            onClick={isPlaying ? stopAnimation : playAnimation}
+            disabled={users.length === 0}
+            className={`w-9 h-9 rounded-full flex items-center justify-center border active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed ${
+              isPlaying
+                ? 'bg-[#d44a3a] border-[#d44a3a] text-white shadow-lg'
+                : 'bg-white/80 backdrop-blur-sm border-[#2B2B23]/10 text-[#2B2B23]/60 hover:text-[#2B2B23] hover:border-[#2B2B23]/20 hover:shadow-md'
+            }`}
+            style={{ transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)' }}
+            title={isPlaying ? 'Stop' : 'Play timeline'}
+          >
+            {isPlaying ? (
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                <rect x="1" y="1" width="4" height="10" rx="1" />
+                <rect x="7" y="1" width="4" height="10" rx="1" />
+              </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                <path d="M2.5 1.5L10.5 6L2.5 10.5V1.5Z" />
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* Period label during animation */}
+      {isPlaying && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 animate-fade-in-scale">
+          <div className="rounded-full bg-[#2B2B23]/85 backdrop-blur-md px-6 py-2.5 text-sm text-[#f0e8de] tracking-wide shadow-xl">
+            {PERIOD_LABELS[period]}
+          </div>
+        </div>
+      )}
 
       {/* Tooltip */}
       <div
         ref={tooltipRef}
-        className="absolute z-40 hidden rounded-xl border border-[#2B2B23]/10 bg-[#f5f0eb]/95 backdrop-blur-sm px-3 py-2 shadow-md pointer-events-none"
-        style={{ maxWidth: 220 }}
+        className="absolute z-40 hidden rounded-2xl border border-[#2B2B23]/6 bg-[#f5f0eb]/96 backdrop-blur-xl px-4 py-3 shadow-xl pointer-events-none"
+        style={{ maxWidth: 240, transition: 'opacity 0.15s ease, transform 0.15s ease' }}
       />
 
-      {/* Loading state */}
+      {/* Loading */}
       {loading && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#f5f0eb]/90">
-          <div className="text-center">
-            <div className="inline-block w-8 h-8 border-2 border-[#c45c4c]/30 border-t-[#c45c4c] rounded-full animate-spin mb-3" />
-            <p className="text-sm text-[#2B2B23]/50 tracking-wide">Loading map...</p>
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#f0e8de]">
+          <div className="text-center animate-fade-in">
+            <div
+              className="inline-block w-8 h-8 border-2 border-[#d44a3a]/20 border-t-[#d44a3a] rounded-full mb-3"
+              style={{ animation: 'spin-smooth 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite' }}
+            />
+            <p className="text-sm text-[#2B2B23]/35 tracking-wide">Loading map...</p>
           </div>
         </div>
       )}
     </div>
   );
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
 }

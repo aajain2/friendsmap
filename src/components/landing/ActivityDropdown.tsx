@@ -6,7 +6,7 @@ const ACTIVITIES = [
   'Full Time',
   'Coterm',
   'Gap Year',
-  'Premed',
+  'Grad School',
   'Undergrad',
   'Other',
 ];

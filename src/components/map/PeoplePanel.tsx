@@ -12,6 +12,9 @@ interface PeoplePanelProps {
   onToggleCollapse: () => void;
   onUserUpdated: (updated: UserEntry) => void;
   onFlyTo: (lng: number, lat: number) => void;
+  selectedPeople: Set<string>;
+  onToggleSelect: (userId: string) => void;
+  onClearSelection: () => void;
 }
 
 function getLocationForPeriod(user: UserEntry, period: TimePeriod) {
@@ -33,18 +36,20 @@ function getPeriodPrefix(period: TimePeriod): string {
   }
 }
 
-export default function PeoplePanel({ users, period, collapsed, onToggleCollapse, onUserUpdated, onFlyTo }: PeoplePanelProps) {
+export default function PeoplePanel({
+  users, period, collapsed, onToggleCollapse, onUserUpdated, onFlyTo,
+  selectedPeople, onToggleSelect, onClearSelection,
+}: PeoplePanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; userId: string } | null>(null);
-  const [editCity, setEditCity] = useState('');
   const [editActivity, setEditActivity] = useState('');
   const [cityQuery, setCityQuery] = useState('');
   const [cityResults, setCityResults] = useState<City[]>([]);
   const [selectedCity, setSelectedCity] = useState<City | null>(null);
   const [saving, setSaving] = useState(false);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const editCityRef = useRef('');
 
-  // Close context menu on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
@@ -57,24 +62,21 @@ export default function PeoplePanel({ users, period, collapsed, onToggleCollapse
     }
   }, [contextMenu]);
 
-  // City search
   useEffect(() => {
-    if (cityQuery.length > 0) {
-      setCityResults(searchCities(cityQuery));
-    } else {
-      setCityResults([]);
-    }
+    if (cityQuery.length > 0) setCityResults(searchCities(cityQuery));
+    else setCityResults([]);
   }, [cityQuery]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, userId: string) => {
     e.preventDefault();
+    e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY, userId });
   }, []);
 
   const startEditing = useCallback((user: UserEntry) => {
     const loc = getLocationForPeriod(user, period);
     setEditingId(user.id!);
-    setEditCity(loc.city);
+    editCityRef.current = loc.city;
     setEditActivity(loc.activity || '');
     setSelectedCity(null);
     setCityQuery('');
@@ -110,18 +112,22 @@ export default function PeoplePanel({ users, period, collapsed, onToggleCollapse
     onFlyTo(loc.lng, loc.lat);
   }, [period, onFlyTo]);
 
+  const hasSelection = selectedPeople.size > 0;
+
   return (
     <>
       {/* Panel */}
       <div
-        className={`absolute top-0 left-0 h-full z-30 transition-transform duration-300 ease-in-out ${
-          collapsed ? '-translate-x-full' : 'translate-x-0'
-        }`}
-        style={{ width: 320 }}
+        className="absolute top-0 left-0 h-full z-30"
+        style={{
+          width: 320,
+          transform: collapsed ? 'translateX(-100%)' : 'translateX(0)',
+          transition: 'transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        }}
       >
-        <div className="h-full flex flex-col bg-[#f5f0eb]/95 backdrop-blur-lg border-r border-[#2B2B23]/10 shadow-xl">
-          {/* Panel header */}
-          <div className="flex items-center justify-between px-4 pt-5 pb-3">
+        <div className="h-full flex flex-col bg-[#f0e8de]/95 backdrop-blur-xl border-r border-[#2B2B23]/8 shadow-2xl">
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 pt-5 pb-3">
             <h2
               className="text-lg tracking-tight"
               style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}
@@ -130,8 +136,8 @@ export default function PeoplePanel({ users, period, collapsed, onToggleCollapse
             </h2>
             <button
               onClick={onToggleCollapse}
-              className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-[#2B2B23]/8 transition-colors text-[#2B2B23]/50 hover:text-[#2B2B23]"
-              title="Close panel"
+              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[#2B2B23]/6 active:scale-90 transition-all duration-200 text-[#2B2B23]/40 hover:text-[#2B2B23]/70"
+              style={{ transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M9 2L4 7L9 12" />
@@ -139,56 +145,73 @@ export default function PeoplePanel({ users, period, collapsed, onToggleCollapse
             </button>
           </div>
 
-          {/* User count */}
-          <div className="px-4 pb-3">
-            <span className="text-xs text-[#2B2B23]/40 tracking-wide">
-              {users.length} {users.length === 1 ? 'person' : 'people'}
+          {/* Count + unselect button */}
+          <div className="px-5 pb-3 flex items-center justify-between">
+            <span className="text-xs text-[#2B2B23]/35 tracking-wide">
+              {hasSelection
+                ? `${selectedPeople.size} selected`
+                : `${users.length} ${users.length === 1 ? 'person' : 'people'}`}
             </span>
+            {hasSelection && (
+              <button
+                onClick={onClearSelection}
+                className="text-[10px] uppercase tracking-wider text-[#d44a3a]/60 hover:text-[#d44a3a] transition-all duration-200 font-medium active:scale-95"
+              >
+                Unselect All
+              </button>
+            )}
           </div>
 
-          {/* Divider */}
-          <div className="mx-4 border-t border-[#2B2B23]/8" />
+          <div className="mx-5 border-t border-[#2B2B23]/6" />
 
           {/* People list */}
-          <div className="flex-1 overflow-y-auto px-2 py-2">
-            {users.map((user) => {
+          <div className="flex-1 overflow-y-auto px-2.5 py-2 scroll-smooth">
+            {users.map((user, index) => {
               const loc = getLocationForPeriod(user, period);
               const isEditing = editingId === user.id;
+              const isSelected = selectedPeople.has(user.id!);
+              const isDimmed = hasSelection && !isSelected;
 
               return (
                 <div
                   key={user.id}
-                  className={`group rounded-xl px-3 py-3 mb-0.5 cursor-pointer transition-colors ${
-                    isEditing ? 'bg-white/60' : 'hover:bg-white/40'
+                  className="animate-fade-in"
+                  style={{ animationDelay: `${index * 40}ms` }}
+                ><div
+                  className={`group/item rounded-2xl px-3 py-3 mb-1 transition-all duration-300 ${
+                    isEditing ? 'bg-white/70 shadow-sm' : 'cursor-pointer hover:bg-white/50 hover:shadow-sm active:scale-[0.98]'
                   }`}
-                  onClick={() => !isEditing && handleCardClick(user)}
+                  style={{
+                    opacity: isDimmed ? 0.35 : 1,
+                    transform: isDimmed ? 'scale(0.97)' : 'scale(1)',
+                    transition: 'all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                  }}
+                  onClick={() => {
+                    if (!isEditing) handleCardClick(user);
+                  }}
                   onContextMenu={(e) => handleContextMenu(e, user.id!)}
                 >
                   {isEditing ? (
-                    /* Edit mode */
-                    <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
+                    <div className="space-y-3 animate-fade-in-scale" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center gap-2.5">
                         <div
-                          className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-medium"
-                          style={{ backgroundColor: user.node_color }}
+                          className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white text-sm font-semibold"
+                          style={{ backgroundColor: user.node_color, boxShadow: `0 0 16px ${user.node_color}40` }}
                         >
                           {user.name.charAt(0).toUpperCase()}
                         </div>
-                        <span className="text-sm font-medium text-[#2B2B23]">{user.name}</span>
+                        <div>
+                          <span className="text-sm font-medium text-[#2B2B23]">{user.name}</span>
+                          <p className="text-[10px] text-[#2B2B23]/40">Editing profile</p>
+                        </div>
                       </div>
 
-                      {/* City selector */}
                       <div className="relative">
-                        <label className="text-[10px] uppercase tracking-wider text-[#2B2B23]/40 mb-1 block">City</label>
+                        <label className="text-[10px] uppercase tracking-wider text-[#2B2B23]/40 mb-1.5 block">Location</label>
                         {selectedCity ? (
-                          <div className="flex items-center gap-2 text-sm">
+                          <div className="flex items-center gap-2 text-sm py-1">
                             <span>{selectedCity.name}, {selectedCity.country}</span>
-                            <button
-                              onClick={() => setSelectedCity(null)}
-                              className="text-[#2B2B23]/40 hover:text-[#2B2B23]"
-                            >
-                              ×
-                            </button>
+                            <button onClick={() => setSelectedCity(null)} className="text-[#2B2B23]/40 hover:text-[#2B2B23]">×</button>
                           </div>
                         ) : (
                           <>
@@ -196,19 +219,15 @@ export default function PeoplePanel({ users, period, collapsed, onToggleCollapse
                               type="text"
                               value={cityQuery}
                               onChange={(e) => setCityQuery(e.target.value)}
-                              placeholder={editCity || 'Search city...'}
-                              className="w-full rounded-lg border border-[#2B2B23]/15 bg-white/80 px-2.5 py-1.5 text-sm placeholder:text-[#2B2B23]/30 focus:outline-none focus:border-[#2B2B23]/30"
+                              placeholder={editCityRef.current || 'Search city...'}
+                              className="w-full rounded-xl border border-[#2B2B23]/10 bg-white/90 px-3 py-2 text-sm placeholder:text-[#2B2B23]/30 focus:outline-none focus:border-[#2B2B23]/20 focus:shadow-sm transition-all duration-200"
                             />
                             {cityResults.length > 0 && (
                               <div className="absolute z-50 mt-1 w-full rounded-lg border border-[#2B2B23]/10 bg-white shadow-lg max-h-40 overflow-y-auto">
                                 {cityResults.map((city) => (
                                   <button
                                     key={`${city.name}-${city.country}`}
-                                    onClick={() => {
-                                      setSelectedCity(city);
-                                      setCityQuery('');
-                                      setCityResults([]);
-                                    }}
+                                    onClick={() => { setSelectedCity(city); setCityQuery(''); setCityResults([]); }}
                                     className="w-full px-2.5 py-1.5 text-left text-sm hover:bg-[#2B2B23]/5"
                                   >
                                     <span className="font-medium">{city.name}</span>
@@ -221,65 +240,90 @@ export default function PeoplePanel({ users, period, collapsed, onToggleCollapse
                         )}
                       </div>
 
-                      {/* Activity */}
                       <div>
-                        <label className="text-[10px] uppercase tracking-wider text-[#2B2B23]/40 mb-1 block">Activity</label>
+                        <label className="text-[10px] uppercase tracking-wider text-[#2B2B23]/40 mb-1.5 block">Activity</label>
                         <select
                           value={editActivity}
                           onChange={(e) => setEditActivity(e.target.value)}
-                          className="w-full rounded-lg border border-[#2B2B23]/15 bg-white/80 px-2.5 py-1.5 text-sm focus:outline-none focus:border-[#2B2B23]/30"
+                          className="w-full rounded-xl border border-[#2B2B23]/10 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:border-[#2B2B23]/20 focus:shadow-sm appearance-none transition-all duration-200"
                         >
                           <option value="">None</option>
                           <option value="Internship">Internship</option>
                           <option value="Full Time">Full Time</option>
                           <option value="Coterm">Coterm</option>
                           <option value="Gap Year">Gap Year</option>
-                          <option value="Premed">Premed</option>
+                          <option value="Grad School">Grad School</option>
                           <option value="Undergrad">Undergrad</option>
                           <option value="Other">Other</option>
                         </select>
                       </div>
 
-                      {/* Save/Cancel */}
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 pt-1">
                         <button
                           onClick={() => handleSave(user)}
                           disabled={saving}
-                          className="flex-1 rounded-lg bg-[#2B2B23] text-[#f5f0eb] py-1.5 text-xs font-medium hover:bg-[#2B2B23]/90 disabled:opacity-50 transition-colors"
+                          className="flex-1 rounded-xl bg-[#2B2B23] text-[#f0e8de] py-2 text-xs font-medium hover:bg-[#2B2B23]/90 active:scale-[0.97] disabled:opacity-50 transition-all duration-200"
+                          style={{ transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
                         >
                           {saving ? 'Saving...' : 'Done'}
                         </button>
                         <button
                           onClick={() => setEditingId(null)}
-                          className="flex-1 rounded-lg border border-[#2B2B23]/15 py-1.5 text-xs text-[#2B2B23]/60 hover:text-[#2B2B23] hover:border-[#2B2B23]/30 transition-colors"
+                          className="flex-1 rounded-xl border border-[#2B2B23]/10 py-2 text-xs text-[#2B2B23]/50 hover:text-[#2B2B23]/80 hover:border-[#2B2B23]/20 active:scale-[0.97] transition-all duration-200"
+                          style={{ transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
                         >
                           Cancel
                         </button>
                       </div>
                     </div>
                   ) : (
-                    /* Normal view */
                     <div className="flex items-center gap-3">
+                      {/* Selection checkbox - visible on hover or when selected */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleSelect(user.id!);
+                        }}
+                        className="w-[18px] h-[18px] rounded-md border flex-shrink-0 flex items-center justify-center active:scale-75"
+                        style={{
+                          backgroundColor: isSelected ? '#2B2B23' : 'transparent',
+                          borderColor: isSelected ? '#2B2B23' : 'rgba(43,43,35,0.15)',
+                          opacity: isSelected ? 1 : undefined,
+                          transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                        }}
+                      >
+                        {isSelected && (
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="animate-pop-in">
+                            <path d="M2 5L4.5 7.5L8 3" />
+                          </svg>
+                        )}
+                      </button>
+
                       <div
-                        className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-medium shadow-sm"
-                        style={{ backgroundColor: user.node_color }}
+                        className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white text-sm font-semibold transition-shadow duration-300"
+                        style={{
+                          backgroundColor: user.node_color,
+                          boxShadow: `0 2px 8px ${user.node_color}25`,
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget).style.boxShadow = `0 0 0 4px ${user.node_color}18, 0 4px 16px ${user.node_color}35`; }}
+                        onMouseLeave={(e) => { (e.currentTarget).style.boxShadow = `0 2px 8px ${user.node_color}25`; }}
                       >
                         {user.name.charAt(0).toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-[#2B2B23] truncate">{user.name}</div>
-                        <div className="text-xs text-[#2B2B23]/50 truncate">
+                        <div className="text-xs text-[#2B2B23]/45 truncate">
                           {loc.city}{loc.activity ? ` · ${loc.activity}` : ''}
                         </div>
                       </div>
                     </div>
                   )}
-                </div>
+                </div></div>
               );
             })}
 
             {users.length === 0 && (
-              <div className="px-3 py-8 text-center text-xs text-[#2B2B23]/30">
+              <div className="px-3 py-8 text-center text-xs text-[#2B2B23]/25 animate-fade-in">
                 No entries yet
               </div>
             )}
@@ -287,12 +331,12 @@ export default function PeoplePanel({ users, period, collapsed, onToggleCollapse
         </div>
       </div>
 
-      {/* Collapse toggle button (visible when panel is collapsed) */}
+      {/* Collapse toggle */}
       {collapsed && (
         <button
           onClick={onToggleCollapse}
-          className="absolute top-4 left-4 z-30 w-10 h-10 rounded-full bg-[#f5f0eb]/90 backdrop-blur-sm border border-[#2B2B23]/10 shadow-lg flex items-center justify-center hover:bg-white/90 transition-colors text-[#2B2B23]/60 hover:text-[#2B2B23]"
-          title="Open people panel"
+          className="absolute top-4 left-4 z-30 w-11 h-11 rounded-full bg-[#f0e8de]/92 backdrop-blur-md border border-[#2B2B23]/8 shadow-lg flex items-center justify-center hover:shadow-xl active:scale-90 transition-all duration-300 text-[#2B2B23]/50 hover:text-[#2B2B23]/80 animate-pop-in"
+          style={{ transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <path d="M6 3L11 8L6 13" />
@@ -304,7 +348,7 @@ export default function PeoplePanel({ users, period, collapsed, onToggleCollapse
       {contextMenu && (
         <div
           ref={contextMenuRef}
-          className="fixed z-50 rounded-xl bg-white/95 backdrop-blur-lg border border-[#2B2B23]/10 shadow-xl py-1 min-w-[140px]"
+          className="fixed z-50 rounded-2xl bg-white/96 backdrop-blur-xl border border-[#2B2B23]/8 shadow-2xl py-1.5 min-w-[170px] animate-fade-in-scale"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
@@ -312,12 +356,12 @@ export default function PeoplePanel({ users, period, collapsed, onToggleCollapse
               const user = users.find((u) => u.id === contextMenu.userId);
               if (user) startEditing(user);
             }}
-            className="w-full px-4 py-2 text-left text-sm text-[#2B2B23] hover:bg-[#2B2B23]/5 transition-colors flex items-center gap-2"
+            className="w-full px-4 py-2.5 text-left text-[13px] text-[#2B2B23] hover:bg-[#2B2B23]/4 active:bg-[#2B2B23]/8 transition-all duration-150 flex items-center gap-2.5 rounded-xl"
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
               <path d="M8.5 2.5l3 3M1.5 9.5l6-6 3 3-6 6H1.5v-3z" />
             </svg>
-            Edit
+            Edit Profile
           </button>
         </div>
       )}

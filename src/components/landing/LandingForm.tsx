@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import confetti from 'canvas-confetti';
 import TimePeriodSection from './TimePeriodSection';
 import { insertUser } from '@/lib/supabase';
 import { getRandomColor } from '@/lib/colors';
@@ -52,6 +53,12 @@ export default function LandingForm() {
         year2_lng: year2.city.lng,
         year2_activity: year2.activity || null,
       });
+      confetti({
+        particleCount: 150,
+        spread: 80,
+        origin: { y: 0.6 },
+      });
+      await new Promise((r) => setTimeout(r, 1200));
       router.push('/map');
     } catch {
       setError('Something went wrong. Please try again.');

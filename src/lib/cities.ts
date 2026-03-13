@@ -3,7 +3,7 @@ import type { City } from '@/types';
 
 const cities: City[] = citiesData as City[];
 
-const QUICK_PICK_NAMES = ['Stanford', 'Palo Alto', 'San Francisco', 'New York City'];
+const QUICK_PICK_NAMES = ['Stanford', 'Palo Alto', 'San Francisco', 'New York City', 'Los Angeles'];
 
 export const QUICK_PICKS: City[] = QUICK_PICK_NAMES
   .map((name) => cities.find((c) => c.name === name)!)

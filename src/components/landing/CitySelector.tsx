@@ -12,45 +12,45 @@ interface CitySelectorProps {
 export default function CitySelector({ value, onChange }: CitySelectorProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<City[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (query.length > 0) {
       setResults(searchCities(query));
-      setIsOpen(true);
       setHighlightIndex(-1);
     } else {
       setResults([]);
-      setIsOpen(false);
     }
   }, [query]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node) &&
-        inputRef.current &&
-        !inputRef.current.contains(e.target as Node)
-      ) {
-        setIsOpen(false);
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsSearchOpen(false);
+        setQuery('');
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (isSearchOpen && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isSearchOpen]);
+
   function selectCity(city: City) {
     onChange(city);
     setQuery('');
-    setIsOpen(false);
+    setIsSearchOpen(false);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (!isOpen || results.length === 0) return;
+    if (results.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setHighlightIndex((i) => Math.min(i + 1, results.length - 1));
@@ -60,6 +60,9 @@ export default function CitySelector({ value, onChange }: CitySelectorProps) {
     } else if (e.key === 'Enter' && highlightIndex >= 0) {
       e.preventDefault();
       selectCity(results[highlightIndex]);
+    } else if (e.key === 'Escape') {
+      setIsSearchOpen(false);
+      setQuery('');
     }
   }
 
@@ -81,9 +84,8 @@ export default function CitySelector({ value, onChange }: CitySelectorProps) {
   }
 
   return (
-    <div className="relative">
-      {/* Quick picks */}
-      <div className="flex flex-wrap gap-1.5 mb-2">
+    <div className="relative" ref={containerRef}>
+      <div className="flex flex-wrap gap-1.5">
         {QUICK_PICKS.map((city) => (
           <button
             key={city.name}
@@ -94,41 +96,61 @@ export default function CitySelector({ value, onChange }: CitySelectorProps) {
             {city.name}
           </button>
         ))}
-      </div>
 
-      {/* Search input */}
-      <input
-        ref={inputRef}
-        type="text"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onFocus={() => query.length > 0 && setIsOpen(true)}
-        placeholder="Search any city..."
-        className="w-full rounded-lg border border-[#2B2B23]/15 bg-white/60 px-3 py-2 text-sm placeholder:text-[#2B2B23]/30 focus:border-[#2B2B23]/30 focus:outline-none transition-colors"
-      />
-
-      {/* Dropdown */}
-      {isOpen && results.length > 0 && (
-        <div
-          ref={dropdownRef}
-          className="city-dropdown absolute z-50 mt-1 w-full rounded-lg border border-[#2B2B23]/10 bg-white shadow-lg"
-        >
-          {results.map((city, i) => (
-            <button
-              key={`${city.name}-${city.country}`}
-              type="button"
-              onClick={() => selectCity(city)}
-              className={`w-full px-3 py-2 text-left text-sm hover:bg-[#2B2B23]/5 transition-colors ${
-                i === highlightIndex ? 'bg-[#2B2B23]/5' : ''
-              }`}
+        {/* Search pill — expands into input */}
+        {isSearchOpen ? (
+          <div className="relative flex-1 min-w-[160px]">
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Search city..."
+              className="w-full rounded-full border border-[#2B2B23]/25 bg-white/70 pl-7 pr-3 py-1 text-xs placeholder:text-[#2B2B23]/30 focus:border-[#2B2B23]/35 focus:outline-none transition-colors"
+            />
+            {/* Search icon inside input */}
+            <svg
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#2B2B23]/30"
+              width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
             >
-              <span className="font-medium">{city.name}</span>
-              <span className="ml-1.5 text-[#2B2B23]/40">{city.country}</span>
-            </button>
-          ))}
-        </div>
-      )}
+              <circle cx="6" cy="6" r="5" />
+              <path d="M10 10L13 13" />
+            </svg>
+
+            {/* Dropdown */}
+            {results.length > 0 && (
+              <div className="city-dropdown absolute z-50 mt-1.5 left-0 w-full min-w-[200px] rounded-lg border border-[#2B2B23]/10 bg-white shadow-lg">
+                {results.map((city, i) => (
+                  <button
+                    key={`${city.name}-${city.country}`}
+                    type="button"
+                    onClick={() => selectCity(city)}
+                    className={`w-full px-3 py-2 text-left text-sm hover:bg-[#2B2B23]/5 transition-colors ${
+                      i === highlightIndex ? 'bg-[#2B2B23]/5' : ''
+                    }`}
+                  >
+                    <span className="font-medium">{city.name}</span>
+                    <span className="ml-1.5 text-[#2B2B23]/40">{city.country}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsSearchOpen(true)}
+            className="rounded-full border border-[#2B2B23]/15 px-2.5 py-1 text-xs text-[#2B2B23]/40 hover:border-[#2B2B23]/30 hover:text-[#2B2B23]/60 transition-colors flex items-center gap-1"
+          >
+            <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="6" cy="6" r="5" />
+              <path d="M10 10L13 13" />
+            </svg>
+            Search
+          </button>
+        )}
+      </div>
     </div>
   );
 }

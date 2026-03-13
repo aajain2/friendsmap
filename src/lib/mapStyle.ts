@@ -1,55 +1,52 @@
 import type { StyleSpecification } from 'maplibre-gl';
 
-// Hand-drawn aesthetic map style using OpenFreeMap vector tiles
-// Cream paper background, red/coral accent lines, progressive labels
 export function createMapStyle(): StyleSpecification {
   return {
     version: 8,
-    name: 'Friends Map Hand-Drawn',
-    // Globe projection for 3D when zoomed out
+    name: 'Friends Map',
     projection: { type: 'globe' },
     sources: {
       openmaptiles: {
         type: 'vector',
-        tiles: [
-          'https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf',
-        ],
-        maxzoom: 14,
-        attribution:
-          '&copy; <a href="https://openfreemap.org">OpenFreeMap</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        url: 'https://tiles.openfreemap.org/planet',
       },
     },
-    // Globe atmosphere styling
+    // Disable atmosphere halo entirely so no crescent shows
     sky: {
-      'sky-color': '#f5f0eb',
-      'sky-horizon-blend': 0.5,
-      'horizon-color': '#e8ddd4',
-      'horizon-fog-blend': 0.5,
-      'fog-color': '#f5f0eb',
-      'fog-ground-blend': 0.5,
+      'sky-color': '#f0e8de',
+      'sky-horizon-blend': 0,
+      'horizon-color': '#f0e8de',
+      'horizon-fog-blend': 0,
+      'fog-color': '#f0e8de',
+      'fog-ground-blend': 0,
+      'atmosphere-blend': 0,
     } as StyleSpecification['sky'],
-    glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
+    glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
     layers: [
       // Background — cream paper
       {
         id: 'background',
         type: 'background',
-        paint: {
-          'background-color': '#f5f0eb',
-        },
+        paint: { 'background-color': '#f0e8de' },
       },
 
-      // Land cover — subtle warm tones
+      // Water
+      {
+        id: 'water',
+        type: 'fill',
+        source: 'openmaptiles',
+        'source-layer': 'water',
+        paint: { 'fill-color': '#d6dfe4', 'fill-opacity': 0.7 },
+      },
+
+      // Subtle landcover
       {
         id: 'landcover-grass',
         type: 'fill',
         source: 'openmaptiles',
         'source-layer': 'landcover',
         filter: ['==', 'class', 'grass'],
-        paint: {
-          'fill-color': '#ede7df',
-          'fill-opacity': 0.4,
-        },
+        paint: { 'fill-color': '#e8e2d6', 'fill-opacity': 0.3 },
       },
       {
         id: 'landcover-wood',
@@ -57,140 +54,47 @@ export function createMapStyle(): StyleSpecification {
         source: 'openmaptiles',
         'source-layer': 'landcover',
         filter: ['==', 'class', 'wood'],
-        paint: {
-          'fill-color': '#e8e0d6',
-          'fill-opacity': 0.3,
-        },
+        paint: { 'fill-color': '#e2dcd0', 'fill-opacity': 0.25 },
       },
 
-      // Water — soft blue-grey wash
-      {
-        id: 'water',
-        type: 'fill',
-        source: 'openmaptiles',
-        'source-layer': 'water',
-        paint: {
-          'fill-color': '#d4dde2',
-          'fill-opacity': 0.6,
-        },
-      },
-
-      // Waterway lines
-      {
-        id: 'waterway',
-        type: 'line',
-        source: 'openmaptiles',
-        'source-layer': 'waterway',
-        minzoom: 6,
-        paint: {
-          'line-color': '#c8d4da',
-          'line-width': [
-            'interpolate', ['linear'], ['zoom'],
-            6, 0.5,
-            12, 2,
-          ],
-          'line-opacity': 0.5,
-        },
-      },
-
-      // Land use — parks, etc
+      // Parks
       {
         id: 'landuse-park',
         type: 'fill',
         source: 'openmaptiles',
         'source-layer': 'landuse',
-        filter: ['in', 'class', 'park', 'cemetery'],
+        filter: ['in', 'class', 'park', 'cemetery', 'pitch'],
         minzoom: 8,
-        paint: {
-          'fill-color': '#e6ddd3',
-          'fill-opacity': 0.3,
-        },
+        paint: { 'fill-color': '#e4ddd1', 'fill-opacity': 0.35 },
       },
 
-      // Country boundaries — bold red lines (the signature hand-drawn accent)
+      // === ROADS — Bold red ===
       {
-        id: 'boundary-country',
+        id: 'road-motorway-casing',
         type: 'line',
         source: 'openmaptiles',
-        'source-layer': 'boundary',
-        filter: ['==', 'admin_level', 2],
+        'source-layer': 'transportation',
+        filter: ['all', ['==', 'class', 'motorway'], ['!=', 'brunnel', 'tunnel']],
+        minzoom: 4,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': '#c45c4c',
-          'line-width': [
-            'interpolate', ['linear'], ['zoom'],
-            0, 0.8,
-            3, 1.5,
-            6, 2.5,
-            10, 3,
-          ],
-          'line-opacity': [
-            'interpolate', ['linear'], ['zoom'],
-            0, 0.7,
-            6, 0.8,
-          ],
-        },
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
+          'line-color': '#b8342a',
+          'line-width': ['interpolate', ['exponential', 1.5], ['zoom'], 4, 0.8, 8, 3, 12, 7, 16, 14],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.3, 8, 0.7],
         },
       },
-
-      // State/province boundaries — thinner red dashed lines
-      {
-        id: 'boundary-state',
-        type: 'line',
-        source: 'openmaptiles',
-        'source-layer': 'boundary',
-        filter: ['==', 'admin_level', 4],
-        minzoom: 3,
-        paint: {
-          'line-color': '#c45c4c',
-          'line-width': [
-            'interpolate', ['linear'], ['zoom'],
-            3, 0.3,
-            6, 0.8,
-            10, 1.2,
-          ],
-          'line-opacity': [
-            'interpolate', ['linear'], ['zoom'],
-            3, 0.3,
-            6, 0.5,
-          ],
-          'line-dasharray': [4, 3],
-        },
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
-        },
-      },
-
-      // Roads — red accent lines at higher zooms (like the illustration)
       {
         id: 'road-motorway',
         type: 'line',
         source: 'openmaptiles',
         'source-layer': 'transportation',
-        filter: ['==', 'class', 'motorway'],
-        minzoom: 5,
+        filter: ['all', ['==', 'class', 'motorway'], ['!=', 'brunnel', 'tunnel']],
+        minzoom: 4,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': '#c45c4c',
-          'line-width': [
-            'interpolate', ['linear'], ['zoom'],
-            5, 0.3,
-            8, 1,
-            12, 2.5,
-            16, 5,
-          ],
-          'line-opacity': [
-            'interpolate', ['linear'], ['zoom'],
-            5, 0.2,
-            8, 0.5,
-            12, 0.6,
-          ],
-        },
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
+          'line-color': '#d44a3a',
+          'line-width': ['interpolate', ['exponential', 1.5], ['zoom'], 4, 0.4, 8, 1.5, 12, 4, 16, 9],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.3, 8, 0.8],
         },
       },
       {
@@ -199,20 +103,12 @@ export function createMapStyle(): StyleSpecification {
         source: 'openmaptiles',
         'source-layer': 'transportation',
         filter: ['==', 'class', 'trunk'],
-        minzoom: 7,
+        minzoom: 6,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': '#c45c4c',
-          'line-width': [
-            'interpolate', ['linear'], ['zoom'],
-            7, 0.2,
-            10, 0.8,
-            14, 2,
-          ],
-          'line-opacity': 0.4,
-        },
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
+          'line-color': '#d44a3a',
+          'line-width': ['interpolate', ['exponential', 1.5], ['zoom'], 6, 0.4, 10, 2, 14, 5],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 6, 0.3, 10, 0.6],
         },
       },
       {
@@ -221,20 +117,12 @@ export function createMapStyle(): StyleSpecification {
         source: 'openmaptiles',
         'source-layer': 'transportation',
         filter: ['==', 'class', 'primary'],
-        minzoom: 8,
+        minzoom: 7,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': '#c45c4c',
-          'line-width': [
-            'interpolate', ['linear'], ['zoom'],
-            8, 0.2,
-            12, 1,
-            16, 2,
-          ],
-          'line-opacity': 0.35,
-        },
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
+          'line-color': '#d44a3a',
+          'line-width': ['interpolate', ['exponential', 1.5], ['zoom'], 7, 0.3, 10, 1.2, 14, 3.5],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0.25, 10, 0.55],
         },
       },
       {
@@ -243,20 +131,12 @@ export function createMapStyle(): StyleSpecification {
         source: 'openmaptiles',
         'source-layer': 'transportation',
         filter: ['in', 'class', 'secondary', 'tertiary'],
-        minzoom: 10,
+        minzoom: 9,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': '#c45c4c',
-          'line-width': [
-            'interpolate', ['linear'], ['zoom'],
-            10, 0.1,
-            14, 0.8,
-            16, 1.5,
-          ],
-          'line-opacity': 0.25,
-        },
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
+          'line-color': '#d44a3a',
+          'line-width': ['interpolate', ['exponential', 1.5], ['zoom'], 9, 0.2, 12, 0.8, 16, 2.5],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0.2, 12, 0.4],
         },
       },
       {
@@ -264,24 +144,76 @@ export function createMapStyle(): StyleSpecification {
         type: 'line',
         source: 'openmaptiles',
         'source-layer': 'transportation',
-        filter: ['in', 'class', 'minor', 'service'],
+        filter: ['in', 'class', 'minor', 'service', 'street'],
         minzoom: 12,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': '#c45c4c',
-          'line-width': [
-            'interpolate', ['linear'], ['zoom'],
-            12, 0.1,
-            16, 0.8,
-          ],
-          'line-opacity': 0.15,
-        },
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
+          'line-color': '#d44a3a',
+          'line-width': ['interpolate', ['exponential', 1.5], ['zoom'], 12, 0.2, 16, 1.2],
+          'line-opacity': 0.25,
         },
       },
 
-      // Buildings — dark outlines at high zoom (ink-drawn feel)
+      // Rail
+      {
+        id: 'road-rail',
+        type: 'line',
+        source: 'openmaptiles',
+        'source-layer': 'transportation',
+        filter: ['==', 'class', 'rail'],
+        minzoom: 10,
+        paint: {
+          'line-color': '#2B2B23',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.4, 14, 1],
+          'line-opacity': 0.2,
+          'line-dasharray': [3, 3],
+        },
+      },
+
+      // Waterways
+      {
+        id: 'waterway',
+        type: 'line',
+        source: 'openmaptiles',
+        'source-layer': 'waterway',
+        minzoom: 7,
+        paint: {
+          'line-color': '#c0cfd8',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 7, 0.3, 12, 1.5],
+          'line-opacity': 0.5,
+        },
+      },
+
+      // === BOUNDARIES — dark ink ===
+      {
+        id: 'boundary-country',
+        type: 'line',
+        source: 'openmaptiles',
+        'source-layer': 'boundary',
+        filter: ['==', 'admin_level', 2],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#2B2B23',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 0, 0.5, 3, 1, 6, 1.5, 10, 2],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0.3, 4, 0.5],
+        },
+      },
+      {
+        id: 'boundary-state',
+        type: 'line',
+        source: 'openmaptiles',
+        'source-layer': 'boundary',
+        filter: ['==', 'admin_level', 4],
+        minzoom: 3,
+        paint: {
+          'line-color': '#2B2B23',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.2, 8, 0.6],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 3, 0.15, 6, 0.25],
+          'line-dasharray': [5, 3],
+        },
+      },
+
+      // === BUILDINGS — dark ink ===
       {
         id: 'building',
         type: 'fill',
@@ -289,19 +221,45 @@ export function createMapStyle(): StyleSpecification {
         'source-layer': 'building',
         minzoom: 13,
         paint: {
-          'fill-color': '#e8e0d6',
-          'fill-opacity': [
-            'interpolate', ['linear'], ['zoom'],
-            13, 0.1,
-            16, 0.3,
-          ],
+          'fill-color': '#e6dfd5',
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.2, 16, 0.5],
           'fill-outline-color': '#2B2B23',
         },
       },
+      {
+        id: 'building-outline',
+        type: 'line',
+        source: 'openmaptiles',
+        'source-layer': 'building',
+        minzoom: 14,
+        paint: {
+          'line-color': '#2B2B23',
+          'line-width': 0.5,
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0.2, 16, 0.5],
+        },
+      },
 
-      // === LABELS — Progressive zoom like Apple Find My ===
-
-      // Country labels — visible from zoom 1
+      // === LABELS ===
+      {
+        id: 'label-water',
+        type: 'symbol',
+        source: 'openmaptiles',
+        'source-layer': 'water_name',
+        minzoom: 2,
+        layout: {
+          'text-field': '{name:latin}',
+          'text-font': ['Noto Sans Italic'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 2, 11, 6, 14],
+          'text-letter-spacing': 0.25,
+          'text-max-width': 8,
+        },
+        paint: {
+          'text-color': '#8ba4b0',
+          'text-opacity': 0.45,
+          'text-halo-color': '#d6dfe4',
+          'text-halo-width': 1.5,
+        },
+      },
       {
         id: 'label-country',
         type: 'symbol',
@@ -309,59 +267,23 @@ export function createMapStyle(): StyleSpecification {
         'source-layer': 'place',
         filter: ['==', 'class', 'country'],
         minzoom: 1,
-        maxzoom: 7,
+        maxzoom: 8,
         layout: {
-          'text-field': ['get', 'name:latin'],
-          'text-font': ['Open Sans Bold'],
-          'text-size': [
-            'interpolate', ['linear'], ['zoom'],
-            1, 10,
-            3, 13,
-            5, 16,
-          ],
+          'text-field': '{name:latin}',
+          'text-font': ['Noto Sans Bold'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 1, 10, 4, 14, 7, 18],
           'text-transform': 'uppercase',
-          'text-letter-spacing': 0.15,
+          'text-letter-spacing': 0.12,
           'text-max-width': 8,
-          'text-allow-overlap': false,
-          'text-padding': 2,
+          'text-padding': 4,
         },
         paint: {
           'text-color': '#2B2B23',
-          'text-opacity': [
-            'interpolate', ['linear'], ['zoom'],
-            1, 0.7,
-            4, 0.5,
-            7, 0.2,
-          ],
-          'text-halo-color': '#f5f0eb',
+          'text-opacity': ['interpolate', ['linear'], ['zoom'], 1, 0.6, 5, 0.45, 8, 0.15],
+          'text-halo-color': '#f0e8de',
           'text-halo-width': 2,
         },
       },
-
-      // Continent/ocean labels
-      {
-        id: 'label-continent',
-        type: 'symbol',
-        source: 'openmaptiles',
-        'source-layer': 'place',
-        filter: ['==', 'class', 'continent'],
-        maxzoom: 3,
-        layout: {
-          'text-field': ['get', 'name:latin'],
-          'text-font': ['Open Sans Bold'],
-          'text-size': 14,
-          'text-transform': 'uppercase',
-          'text-letter-spacing': 0.3,
-        },
-        paint: {
-          'text-color': '#2B2B23',
-          'text-opacity': 0.4,
-          'text-halo-color': '#f5f0eb',
-          'text-halo-width': 2,
-        },
-      },
-
-      // State/province labels — visible from zoom 4
       {
         id: 'label-state',
         type: 'symbol',
@@ -369,67 +291,40 @@ export function createMapStyle(): StyleSpecification {
         'source-layer': 'place',
         filter: ['==', 'class', 'state'],
         minzoom: 4,
-        maxzoom: 9,
+        maxzoom: 10,
         layout: {
-          'text-field': ['get', 'name:latin'],
-          'text-font': ['Open Sans Regular'],
-          'text-size': [
-            'interpolate', ['linear'], ['zoom'],
-            4, 9,
-            6, 11,
-            8, 13,
-          ],
+          'text-field': '{name:latin}',
+          'text-font': ['Noto Sans Regular'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 4, 9, 7, 12],
           'text-transform': 'uppercase',
-          'text-letter-spacing': 0.1,
+          'text-letter-spacing': 0.08,
           'text-max-width': 8,
-          'text-allow-overlap': false,
         },
         paint: {
           'text-color': '#6b6560',
-          'text-opacity': [
-            'interpolate', ['linear'], ['zoom'],
-            4, 0.5,
-            6, 0.6,
-            9, 0.3,
-          ],
-          'text-halo-color': '#f5f0eb',
+          'text-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.4, 6, 0.5, 10, 0.2],
+          'text-halo-color': '#f0e8de',
           'text-halo-width': 1.5,
         },
       },
-
-      // City labels — capitals and major cities from zoom 4, others from zoom 6+
       {
         id: 'label-city-major',
         type: 'symbol',
         source: 'openmaptiles',
         'source-layer': 'place',
-        filter: [
-          'all',
-          ['==', 'class', 'city'],
-          ['<=', 'rank', 4],
-        ],
+        filter: ['all', ['==', 'class', 'city'], ['<=', 'rank', 4]],
         minzoom: 3,
         layout: {
-          'text-field': ['get', 'name:latin'],
-          'text-font': ['Open Sans Semibold'],
-          'text-size': [
-            'interpolate', ['linear'], ['zoom'],
-            3, 9,
-            6, 12,
-            10, 15,
-          ],
+          'text-field': '{name:latin}',
+          'text-font': ['Noto Sans Bold'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 3, 10, 7, 14, 11, 18],
           'text-max-width': 8,
-          'text-allow-overlap': false,
-          'text-padding': 4,
+          'text-padding': 6,
         },
         paint: {
           'text-color': '#2B2B23',
-          'text-opacity': [
-            'interpolate', ['linear'], ['zoom'],
-            3, 0.6,
-            6, 0.8,
-          ],
-          'text-halo-color': '#f5f0eb',
+          'text-opacity': ['interpolate', ['linear'], ['zoom'], 3, 0.5, 6, 0.75],
+          'text-halo-color': '#f0e8de',
           'text-halo-width': 1.5,
         },
       },
@@ -438,38 +333,22 @@ export function createMapStyle(): StyleSpecification {
         type: 'symbol',
         source: 'openmaptiles',
         'source-layer': 'place',
-        filter: [
-          'all',
-          ['==', 'class', 'city'],
-          ['>', 'rank', 4],
-        ],
+        filter: ['all', ['==', 'class', 'city'], ['>', 'rank', 4]],
         minzoom: 5,
         layout: {
-          'text-field': ['get', 'name:latin'],
-          'text-font': ['Open Sans Regular'],
-          'text-size': [
-            'interpolate', ['linear'], ['zoom'],
-            5, 9,
-            8, 11,
-            12, 14,
-          ],
+          'text-field': '{name:latin}',
+          'text-font': ['Noto Sans Regular'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 5, 9, 9, 13],
           'text-max-width': 8,
-          'text-allow-overlap': false,
           'text-padding': 4,
         },
         paint: {
           'text-color': '#2B2B23',
-          'text-opacity': [
-            'interpolate', ['linear'], ['zoom'],
-            5, 0.5,
-            8, 0.7,
-          ],
-          'text-halo-color': '#f5f0eb',
+          'text-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.4, 8, 0.65],
+          'text-halo-color': '#f0e8de',
           'text-halo-width': 1.5,
         },
       },
-
-      // Town labels — zoom 8+
       {
         id: 'label-town',
         type: 'symbol',
@@ -478,74 +357,38 @@ export function createMapStyle(): StyleSpecification {
         filter: ['==', 'class', 'town'],
         minzoom: 8,
         layout: {
-          'text-field': ['get', 'name:latin'],
-          'text-font': ['Open Sans Regular'],
-          'text-size': [
-            'interpolate', ['linear'], ['zoom'],
-            8, 9,
-            12, 12,
-          ],
+          'text-field': '{name:latin}',
+          'text-font': ['Noto Sans Regular'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 8, 9, 12, 12],
           'text-max-width': 8,
-          'text-allow-overlap': false,
         },
         paint: {
           'text-color': '#6b6560',
-          'text-opacity': 0.6,
-          'text-halo-color': '#f5f0eb',
+          'text-opacity': 0.55,
+          'text-halo-color': '#f0e8de',
           'text-halo-width': 1,
         },
       },
-
-      // Village labels — zoom 10+
       {
         id: 'label-village',
         type: 'symbol',
         source: 'openmaptiles',
         'source-layer': 'place',
-        filter: ['in', 'class', 'village', 'hamlet'],
+        filter: ['in', 'class', 'village', 'hamlet', 'suburb'],
         minzoom: 11,
         layout: {
-          'text-field': ['get', 'name:latin'],
-          'text-font': ['Open Sans Regular'],
+          'text-field': '{name:latin}',
+          'text-font': ['Noto Sans Regular'],
           'text-size': 10,
           'text-max-width': 8,
-          'text-allow-overlap': false,
         },
         paint: {
           'text-color': '#8a847d',
-          'text-opacity': 0.5,
-          'text-halo-color': '#f5f0eb',
+          'text-opacity': 0.45,
+          'text-halo-color': '#f0e8de',
           'text-halo-width': 1,
         },
       },
-
-      // Water name labels
-      {
-        id: 'label-water',
-        type: 'symbol',
-        source: 'openmaptiles',
-        'source-layer': 'water_name',
-        minzoom: 3,
-        layout: {
-          'text-field': ['get', 'name:latin'],
-          'text-font': ['Open Sans Italic'],
-          'text-size': [
-            'interpolate', ['linear'], ['zoom'],
-            3, 10,
-            6, 13,
-          ],
-          'text-letter-spacing': 0.2,
-          'text-max-width': 8,
-        },
-        paint: {
-          'text-color': '#8ba4b0',
-          'text-opacity': 0.5,
-          'text-halo-color': '#d4dde2',
-          'text-halo-width': 1,
-        },
-      },
-
-      // Road name labels — zoom 12+
       {
         id: 'label-road',
         type: 'symbol',
@@ -553,20 +396,16 @@ export function createMapStyle(): StyleSpecification {
         'source-layer': 'transportation_name',
         minzoom: 12,
         layout: {
-          'text-field': ['get', 'name:latin'],
-          'text-font': ['Open Sans Regular'],
-          'text-size': [
-            'interpolate', ['linear'], ['zoom'],
-            12, 9,
-            16, 12,
-          ],
+          'text-field': '{name:latin}',
+          'text-font': ['Noto Sans Regular'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 12, 9, 16, 12],
           'symbol-placement': 'line',
           'text-rotation-alignment': 'map',
         },
         paint: {
           'text-color': '#8a847d',
-          'text-opacity': 0.6,
-          'text-halo-color': '#f5f0eb',
+          'text-opacity': 0.55,
+          'text-halo-color': '#f0e8de',
           'text-halo-width': 1,
         },
       },
