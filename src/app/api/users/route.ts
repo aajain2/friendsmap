@@ -46,3 +46,26 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json(data, { status: 201 });
 }
+
+// PATCH /api/users — update an existing user
+export async function PATCH(request: NextRequest) {
+  const body = await request.json();
+  const { id, ...updates } = body;
+
+  if (!id) {
+    return NextResponse.json({ error: 'Missing user id' }, { status: 400 });
+  }
+
+  const { data, error } = await supabase
+    .from('users')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json(data);
+}

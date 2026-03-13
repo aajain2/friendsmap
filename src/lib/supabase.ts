@@ -23,3 +23,17 @@ export async function fetchAllUsers(): Promise<UserEntry[]> {
 
   return res.json();
 }
+
+export async function updateUser(data: Partial<UserEntry> & { id: string }): Promise<UserEntry> {
+  const res = await fetch('/api/users', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    throw new Error('Failed to update user');
+  }
+
+  return res.json();
+}

@@ -47,9 +47,14 @@ body {
   z-index: 1;
 }
 
-/* Map vintage filter */
+/* Map vintage filter — warm paper feel with slight desaturation */
 .map-vintage .maplibregl-canvas {
-  filter: sepia(0.12) saturate(0.75) brightness(1.05);
+  filter: sepia(0.08) saturate(0.85) brightness(1.02) contrast(1.05);
+}
+
+/* Globe atmosphere glow */
+.maplibregl-canvas-container {
+  background: #f5f0eb;
 }
 
 /* MapLibre overrides */
