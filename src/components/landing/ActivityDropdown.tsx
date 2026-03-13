@@ -7,6 +7,7 @@ const ACTIVITIES = [
   'Coterm',
   'Gap Year',
   'Premed',
+  'Undergrad',
   'Other',
 ];
 

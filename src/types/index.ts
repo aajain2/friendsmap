@@ -13,6 +13,7 @@ export type Activity =
   | 'Coterm'
   | 'Gap Year'
   | 'Premed'
+  | 'Undergrad'
   | 'Other'
   | '';
 
